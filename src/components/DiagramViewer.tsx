@@ -154,7 +154,10 @@ export default component$(() => {
         </button>
       </div>
       <div class="diagram-content">
-        <img src="./1.21.3.svg" alt="Minecraft Server Software Evolution" />
+        <img
+          src={import.meta.env.BASE_URL + "1.21.3.svg"}
+          alt="Server Software"
+        />
       </div>
     </div>
   );
