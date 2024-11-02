@@ -154,10 +154,7 @@ export default component$(() => {
         </button>
       </div>
       <div class="diagram-content">
-        <img
-          src={import.meta.env.BASE_URL + "1.21.3.svg"}
-          alt="Server Software"
-        />
+        <img src="/1.21.3.svg" alt="Server Software" />
       </div>
     </div>
   );
