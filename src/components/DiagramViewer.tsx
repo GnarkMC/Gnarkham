@@ -5,120 +5,158 @@ import {
   useStore,
   $,
 } from "@builder.io/qwik";
+import type { Signal } from "@builder.io/qwik";
 
-interface ViewerState {
-  x: number;
-  y: number;
-  scale: number;
-  isDragging: boolean;
-  startX: number;
-  startY: number;
-}
+type ElementSignal = Signal<HTMLElement | undefined>;
 
 export default component$(() => {
-  const containerRef = useSignal<HTMLElement>();
-  const state = useStore<ViewerState>({
+  const viewerRef = useSignal<HTMLElement>();
+  const contentRef = useSignal<HTMLElement>();
+  const svgRef = useSignal<SVGElement>();
+
+  const state = useStore({
     x: 0,
     y: 0,
     scale: 1,
     isDragging: false,
     startX: 0,
     startY: 0,
-  });
-
-  const updateTransform = $(() => {
-    if (!containerRef.value) return;
-    state.scale = Math.min(Math.max(0.25, state.scale), 2);
-    containerRef.value.style.setProperty("--tx", `${state.x}px`);
-    containerRef.value.style.setProperty("--ty", `${state.y}px`);
-    containerRef.value.style.setProperty("--scale", `${state.scale}`);
-  });
-
-  const resetView = $(() => {
-    state.x = 0;
-    state.y = 0;
-    state.scale = 1;
-    updateTransform();
-  });
-
-  const toggleFullscreen = $((e: Event) => {
-    const viewer = (e.target as HTMLElement).closest(".viewer");
-    if (!viewer) return;
-
-    if (!document.fullscreenElement) {
-      try {
-        viewer.requestFullscreen();
-      } catch {
-        const el = viewer as any;
-        if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
-      }
-    } else {
-      try {
-        document.exitFullscreen();
-      } catch {
-        const doc = document as any;
-        if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
-      }
-    }
+    dragTarget: null as Element | null,
   });
 
   useVisibleTask$(({ cleanup }) => {
-    const container = containerRef.value;
-    if (!container) return;
+    const viewer = viewerRef.value;
+    const content = contentRef.value;
 
-    const onPointerDown = (e: PointerEvent) => {
+    // Early return if elements aren't available
+    if (!viewer || !content) return;
+
+    async function injectSVG() {
+      try {
+        const response = await fetch("/1.21.3.svg");
+        const text = await response.text();
+        content.innerHTML = text;
+        const svg = content.querySelector("svg");
+        if (svg) {
+          svg.style.width = "100%";
+          svg.style.height = "100%";
+          svg.style.display = "block";
+          svg.style.objectFit = "contain";
+          svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          svgRef.value = svg;
+
+          svg.querySelectorAll("a").forEach((link) => {
+            link.onclick = (e) => {
+              if (!state.isDragging) {
+                const href = link.getAttribute("href");
+                if (href) window.open(href, "_blank");
+              }
+              e.preventDefault();
+            };
+          });
+        }
+      } catch (error) {
+        console.error("Error loading SVG:", error);
+      }
+    }
+
+    function updateTransform() {
+      content.style.setProperty("--tx", `${state.x}px`);
+      content.style.setProperty("--ty", `${state.y}px`);
+      content.style.setProperty("--scale", `${state.scale}`);
+    }
+
+    function onPointerDown(e: PointerEvent) {
       if (e.button !== 0) return;
+
+      const target = e.target as Element;
+      state.dragTarget = target;
+
       state.isDragging = true;
       state.startX = e.clientX - state.x;
       state.startY = e.clientY - state.y;
-      container.setPointerCapture(e.pointerId);
-    };
+      viewer.style.cursor = "grabbing";
+      viewer.setPointerCapture(e.pointerId);
+    }
 
-    const onPointerMove = (e: PointerEvent) => {
+    function onPointerMove(e: PointerEvent) {
       if (!state.isDragging) return;
       state.x = e.clientX - state.startX;
       state.y = e.clientY - state.startY;
       updateTransform();
-    };
+    }
 
-    const onPointerUp = () => {
+    function onPointerUp(e: PointerEvent) {
+      const wasDragging = state.isDragging;
       state.isDragging = false;
-    };
+      viewer.style.cursor = "grab";
 
-    const onWheel = (e: WheelEvent) => {
+      if (!wasDragging && state.dragTarget) {
+        const link = state.dragTarget.closest("a");
+        if (link) {
+          const href = link.getAttribute("href");
+          if (href) window.open(href, "_blank");
+        }
+      }
+
+      state.dragTarget = null;
+    }
+
+    function onWheel(e: WheelEvent) {
       e.preventDefault();
       const delta = e.deltaY * -0.001;
       const newScale = state.scale * (1 + delta);
 
       if (newScale >= 0.25 && newScale <= 2) {
-        const rect = container.getBoundingClientRect();
+        const rect = viewer.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
-
         state.scale = newScale;
         state.x = x - (x - state.x) * (1 + delta);
         state.y = y - (y - state.y) * (1 + delta);
         updateTransform();
       }
-    };
+    }
 
-    container.addEventListener("pointerdown", onPointerDown);
-    container.addEventListener("pointermove", onPointerMove);
-    container.addEventListener("pointerup", onPointerUp);
-    container.addEventListener("pointercancel", onPointerUp);
-    container.addEventListener("wheel", onWheel, { passive: false });
+    injectSVG();
+
+    viewer.addEventListener("pointerdown", onPointerDown);
+    viewer.addEventListener("pointermove", onPointerMove);
+    viewer.addEventListener("pointerup", onPointerUp);
+    viewer.addEventListener("pointercancel", onPointerUp);
+    viewer.addEventListener("wheel", onWheel, { passive: false });
 
     cleanup(() => {
-      container.removeEventListener("pointerdown", onPointerDown);
-      container.removeEventListener("pointermove", onPointerMove);
-      container.removeEventListener("pointerup", onPointerUp);
-      container.removeEventListener("pointercancel", onPointerUp);
-      container.removeEventListener("wheel", onWheel);
+      viewer.removeEventListener("pointerdown", onPointerDown);
+      viewer.removeEventListener("pointermove", onPointerMove);
+      viewer.removeEventListener("pointerup", onPointerUp);
+      viewer.removeEventListener("pointercancel", onPointerUp);
+      viewer.removeEventListener("wheel", onWheel);
     });
   });
 
+  const onReset = $(() => {
+    const content = contentRef.value;
+    if (!content) return;
+
+    state.x = 0;
+    state.y = 0;
+    state.scale = 1;
+    content.style.setProperty("--tx", "0px");
+    content.style.setProperty("--ty", "0px");
+    content.style.setProperty("--scale", "1");
+  });
+
+  const onFullscreen = $(() => {
+    const element = viewerRef.value;
+    if (!element) return;
+    document.fullscreenElement
+      ? document.exitFullscreen()
+      : element.requestFullscreen();
+  });
+
   return (
-    <div class="viewer">
+    <div class="viewer" ref={viewerRef}>
       <button class="version-select" type="button">
         1.21.3
         <svg
@@ -133,19 +171,18 @@ export default component$(() => {
 
       <div class="viewer-toolbar">
         <div class="viewer-controls">
-          <button class="viewer-button" onClick$={resetView}>
+          <button class="viewer-button" onClick$={onReset}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
             >
-              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-              <path d="M3 3v5h5" />
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8M3 3v5h5" />
             </svg>
           </button>
           <div class="viewer-divider" />
-          <button class="viewer-button" onClick$={toggleFullscreen}>
+          <button class="viewer-button" onClick$={onFullscreen}>
             <svg
               viewBox="0 0 24 24"
               fill="none"
@@ -158,14 +195,7 @@ export default component$(() => {
         </div>
       </div>
 
-      <div class="viewer-content" ref={containerRef}>
-        <img
-          src="/1.21.3.svg"
-          alt="Server Software"
-          loading="eager"
-          draggable={false}
-        />
-      </div>
+      <div class="viewer-content" ref={contentRef} />
     </div>
   );
 });

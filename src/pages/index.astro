@@ -1,17 +1,23 @@
 ---
 import DiagramViewer from '../components/DiagramViewer';
 import '../styles/styles.css';
+
+const META = {
+  title: 'Gnurk',
+  description: 'Its Gnurking time, and then I Gnurked all over the place.',
+  lang: 'en',
+};
 ---
 
 <!DOCTYPE html>
-<html lang="en">
+<html lang={META.lang}>
   <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width" />
-    <meta name="generator" content={Astro.generator} />
-    <title>Gnurk</title>
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <meta name="description" content="Interactive visualization of Minecraft Server Software Evolution" />
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width">
+    <meta name="generator" content={Astro.generator}>
+    <meta name="description" content={META.description}>
+    <title>{META.title}</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   </head>
   <body>
     <DiagramViewer client:visible />
