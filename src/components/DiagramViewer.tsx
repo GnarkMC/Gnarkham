@@ -1,160 +1,199 @@
-import { component$, useSignal, useVisibleTask$ } from "@builder.io/qwik";
+import {
+  component$,
+  useSignal,
+  useVisibleTask$,
+  useStore,
+  $,
+} from "@builder.io/qwik";
 
 interface ViewerState {
+  x: number;
+  y: number;
   scale: number;
-  pointX: number;
-  pointY: number;
-  start: { x: number; y: number };
+  isDragging: boolean;
+  startX: number;
+  startY: number;
+  currentVersion: string;
 }
 
 export default component$(() => {
-  const state = useSignal<ViewerState>({
+  const containerRef = useSignal<HTMLElement>();
+  const state = useStore<ViewerState>({
+    x: 0,
+    y: 0,
     scale: 1,
-    pointX: 0,
-    pointY: 0,
-    start: { x: 0, y: 0 },
+    isDragging: false,
+    startX: 0,
+    startY: 0,
+    currentVersion: "1.21.3",
   });
 
-  const isPanning = useSignal(false);
-  const imageRef = useSignal<HTMLImageElement>();
+  // Available versions
+  const versions = ["1.21.3"];
 
-  // Setup event listeners
+  // Single function to update transform
+  const updateTransform = $(() => {
+    if (!containerRef.value) return;
+
+    // Keep scale within bounds
+    state.scale = Math.min(Math.max(0.25, state.scale), 2);
+
+    containerRef.value.style.setProperty("--tx", `${state.x}px`);
+    containerRef.value.style.setProperty("--ty", `${state.y}px`);
+    containerRef.value.style.setProperty("--scale", `${state.scale}`);
+  });
+
+  // Reset view and update version
+  const resetView = $(() => {
+    state.x = 0;
+    state.y = 0;
+    state.scale = 1;
+    updateTransform();
+  });
+
   useVisibleTask$(({ cleanup }) => {
-    const image = document.querySelector(
-      ".diagram-content img"
-    ) as HTMLImageElement;
-    const content = document.querySelector(".diagram-content") as HTMLElement;
+    const container = containerRef.value;
+    if (!container) return;
 
-    if (!image || !content) return;
+    // Simple pointer event handlers
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return; // Left click only
 
-    // Store image reference for reset button
-    imageRef.value = image;
-
-    const setTransform = () => {
-      image.style.transform = `translate(${state.value.pointX}px, ${state.value.pointY}px) scale(${state.value.scale})`;
+      state.isDragging = true;
+      state.startX = e.clientX - state.x;
+      state.startY = e.clientY - state.y;
+      container.setPointerCapture(e.pointerId);
     };
 
-    const handleMouseDown = (e: MouseEvent) => {
+    const onPointerMove = (e: PointerEvent) => {
+      if (!state.isDragging) return;
+
+      state.x = e.clientX - state.startX;
+      state.y = e.clientY - state.startY;
+      updateTransform();
+    };
+
+    const onPointerUp = () => {
+      state.isDragging = false;
+    };
+
+    // Simple wheel zoom
+    const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      isPanning.value = true;
-      state.value = {
-        ...state.value,
-        start: {
-          x: e.clientX - state.value.pointX,
-          y: e.clientY - state.value.pointY,
-        },
-      };
+
+      const delta = e.deltaY * -0.001;
+      const newScale = state.scale * (1 + delta);
+
+      // Only update if scale would be within bounds
+      if (newScale >= 0.25 && newScale <= 2) {
+        const rect = container.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        state.scale = newScale;
+        state.x = x - (x - state.x) * (1 + delta);
+        state.y = y - (y - state.y) * (1 + delta);
+        updateTransform();
+      }
     };
 
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isPanning.value) return;
-      state.value = {
-        ...state.value,
-        pointX: e.clientX - state.value.start.x,
-        pointY: e.clientY - state.value.start.y,
-      };
-      setTransform();
-    };
-
-    const handleMouseUp = () => {
-      isPanning.value = false;
-    };
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      const xs = (e.clientX - state.value.pointX) / state.value.scale;
-      const ys = (e.clientY - state.value.pointY) / state.value.scale;
-      const delta = -e.deltaY * 0.01;
-
-      state.value = {
-        ...state.value,
-        scale: Math.min(Math.max(0.25, state.value.scale + delta), 4),
-        pointX: e.clientX - xs * state.value.scale,
-        pointY: e.clientY - ys * state.value.scale,
-      };
-      setTransform();
-    };
-
-    const resetView = () => {
-      state.value = {
-        scale: 1,
-        pointX: 0,
-        pointY: 0,
-        start: { x: 0, y: 0 },
-      };
-      setTransform();
-    };
-
-    // Attach event listeners
-    content.addEventListener("mousedown", handleMouseDown);
-    content.addEventListener("mousemove", handleMouseMove);
-    window.addEventListener("mouseup", handleMouseUp);
-    content.addEventListener("wheel", handleWheel);
-    content.addEventListener("dblclick", resetView);
+    // Event listeners
+    container.addEventListener("pointerdown", onPointerDown);
+    container.addEventListener("pointermove", onPointerMove);
+    container.addEventListener("pointerup", onPointerUp);
+    container.addEventListener("pointercancel", onPointerUp);
+    container.addEventListener("wheel", onWheel, { passive: false });
 
     // Cleanup
     cleanup(() => {
-      content.removeEventListener("mousedown", handleMouseDown);
-      content.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-      content.removeEventListener("wheel", handleWheel);
-      content.removeEventListener("dblclick", resetView);
+      container.removeEventListener("pointerdown", onPointerDown);
+      container.removeEventListener("pointermove", onPointerMove);
+      container.removeEventListener("pointerup", onPointerUp);
+      container.removeEventListener("pointercancel", onPointerUp);
+      container.removeEventListener("wheel", onWheel);
     });
   });
 
   return (
-    <div class="diagram-viewer">
-      <div class="toolbar">
-        <button
-          onClick$={() => {
-            if (imageRef.value) {
-              state.value = {
-                scale: 1,
-                pointX: 0,
-                pointY: 0,
-                start: { x: 0, y: 0 },
-              };
-              imageRef.value.style.transform = `translate(0px, 0px) scale(1)`;
-            }
-          }}
-          aria-label="Reset view"
+    <div class="viewer">
+      <button class="version-select" type="button">
+        {state.currentVersion}
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
         >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      <div class="viewer-toolbar">
+        <div class="viewer-controls">
+          <button
+            class="viewer-button"
+            onClick$={resetView}
+            aria-label="Reset view"
           >
-            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
-            <path d="M3 3v5h5" />
-          </svg>
-        </button>
-        <button
-          onClick$={() => {
-            if (!document.fullscreenElement) {
-              document.querySelector(".diagram-viewer")?.requestFullscreen();
-            } else {
-              document.exitFullscreen();
-            }
-          }}
-          aria-label="Toggle fullscreen"
-        >
-          <svg
-            width="24"
-            height="24"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+              <path d="M3 3v5h5" />
+            </svg>
+          </button>
+          <div class="viewer-divider" />
+          <button
+            class="viewer-button"
+            onClick$={$((e: Event) => {
+              const viewer = (e.target as HTMLElement).closest(".viewer");
+              if (!viewer) return;
+
+              if (!document.fullscreenElement) {
+                try {
+                  viewer.requestFullscreen();
+                } catch (err) {
+                  // Fallback for Safari/iOS
+                  const el = viewer as any;
+                  if (el.webkitRequestFullscreen) {
+                    el.webkitRequestFullscreen();
+                  }
+                }
+              } else {
+                try {
+                  document.exitFullscreen();
+                } catch (err) {
+                  // Fallback for Safari/iOS
+                  const doc = document as any;
+                  if (doc.webkitExitFullscreen) {
+                    doc.webkitExitFullscreen();
+                  }
+                }
+              }
+            })}
+            aria-label="Toggle fullscreen"
           >
-            <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
-          </svg>
-        </button>
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3" />
+            </svg>
+          </button>
+        </div>
       </div>
-      <div class="diagram-content">
-        <img src="/1.21.3.svg" alt="Server Software" />
+      <div class="viewer-content" ref={containerRef}>
+        <img
+          src={`/${state.currentVersion}.svg`}
+          alt={`Server Software Version ${state.currentVersion}`}
+          loading="eager"
+          draggable={false}
+        />
       </div>
     </div>
   );
